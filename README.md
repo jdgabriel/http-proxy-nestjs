@@ -1,85 +1,139 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+# NestJS Proxy module
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+### This is fork based on [Finastra - Node Proxy Lib](https://github.com/Finastra/finastra-nodejs-libs/tree/develop/libs/proxy)
 
-## Description
+## How to use
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+You can import the module like so :
 
-## Project setup
+#### `app.module.ts`
 
-```bash
-$ pnpm install
+```typescript
+ProxyModule.forRootAsync({
+  imports: [EnvService],
+  useClass: ProxyConfigService,
+}),
 ```
 
-## Compile and run the project
+#### `proxy-config.service.ts`
 
+```typescript
+import { Injectable } from '@nestjs/common';
+import { EnvService } from '../environments/env.service';
+import { ProxyModuleOptions, ProxyModuleOptionsFactory } from './proxy.interface';
+
+@Injectable()
+export class ProxyConfigService implements ProxyModuleOptionsFactory {
+  constructor(private env: EnvService) {}
+
+  createModuleConfig(): ProxyModuleOptions {
+    return {
+      services: this.env.get('ALL_SERVICES') ?? {},
+      allowedCookies: [],
+      config: {},
+    };
+  }
+}
+```
+## Environments
+
+#### `env.ts`
+
+```ts
+import { z } from 'zod';
+
+function refineServiceUrl(service: string) {
+  return z
+    .string()
+    .url()
+    .transform((value) => ({ [service]: value }));
+}
+
+export const envSchema = z
+  .object({
+    // Application
+    NODE_ENV: z
+      .enum(['development', 'production', 'test'])
+      .default('development'),
+    APP_PORT: z.number({ coerce: true }).default(8081),
+
+    // Services
+    SERVICE_DOG: refineServiceUrl('dog'),
+    SERVICE_ANIME: refineServiceUrl('anime'),
+  })
+  .transform((values) => {
+    const servicesSchema = z.record(z.string(), z.string());
+    const SERVICES: Record<string, string> = {};
+
+    for (const envKey of Object.keys(values)) {
+      if (String(envKey).startsWith('SERVICE_')) {
+        Object.assign(SERVICES, values[envKey]);
+      }
+    }
+
+    return {
+      ...values,
+      ALL_SERVICES: servicesSchema.parse(SERVICES),
+    };
+  });
+
+export type Env = z.infer<typeof envSchema>;
+
+```
+You can configure all services in `.env` file.
 ```bash
-# development
-$ pnpm run start
-
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+# Services
+SERVICE_DOG="https://dog.ceo/api/breeds/image/random"
+SERVICE_ANIME="https://animechan.io/api/v1/quotes/random"
 ```
 
-## Run tests
+When the application starts, all environments starting with `SERVICE_` are transformed and stored in a new variable `ALL_SERVICES` which is used to configure the available routes.
 
-```bash
-# unit tests
-$ pnpm run test
+#### `env.service.ts`
+Import where you want `EnvService` to get typed all environments.
 
-# e2e tests
-$ pnpm run test:e2e
+<img src="./.github/environments-type.png">
 
-# test coverage
-$ pnpm run test:cov
+## Configuration
+
+Whether synchronously or asynchronously, the module takes two parameters (both optionals).
+
+- **services** : which is a collection of urls with a given id so that you can query them more efficiently
+- **config** : which is the configuration from [http-proxy](https://github.com/http-party/node-http-proxy) which we're using under the hood. Find the official documentation of this configuration [here](https://github.com/http-party/node-http-proxy#options).
+
+### Token forwarding
+
+In this repository fork, by default, OAuth token are forwarded to the service call being proxied. 
+
+> [!WARNING]
+> Be careful to only forward tokens to internal services. Don't forward the token to third party services.
+
+### Cookies forwarding
+
+Cookies are not proxied by default. You can opt in by listing the cookie names in the `allowedCookies` option:
+
+```typescript
+allowedCookies: ['cookie1', 'cookie2'],
 ```
 
-## Resources
+### Default module configuration
 
-Check out a few resources that may come in handy when working with NestJS:
+If you do not provide any, the default proxy configuration for this module can be found in [proxy.constants.ts](./src/module/proxy/proxy.constants.ts), under `defaultProxyOptions`
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+## Client-side usage examples
 
-## Support
+```typescript
+const serverUri = 'http://localhost:3000';
+const serviceName = 'dog';
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+fetch(serverUri, {
+  headers: {
+    'x-service-name': serviceName
+  }
+});
+```
 
-## Stay in touch
+Forked by [Finastra - Node Proxy Lib](https://github.com/Finastra/finastra-nodejs-libs/tree/develop/libs/proxy)
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Modified by [Gabriel Duarte](https://github.com/jdgabriel)
